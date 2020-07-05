@@ -1,0 +1,41 @@
+kernel void mul(global const float *a, global const float *b, global float *c, uint n, uint l, uint m){
+
+    const int row = get_local_id(0) * WORK_PER_THREAD; // max : TileSize
+    const int col = get_local_id(1); // max: TileSize
+
+    const int globalRow = get_global_id(0) * WORK_PER_THREAD; // (0 .. N)
+    const int globalCol = get_global_id(1); // (0 .. M)
+
+    local float ASub[TILE_SIZE][TILE_SIZE];
+    local float BSub[TILE_SIZE][TILE_SIZE];
+
+    float acc[WORK_PER_THREAD];
+    for (int i = 0; i < WORK_PER_THREAD; ++i) {
+        acc[i] = 0.0f;
+    }
+
+    const int RTS = TILE_SIZE / WORK_PER_THREAD;
+
+    for (int t = 0; t < l; t += TILE_SIZE) {
+        for (int w = 0; w < WORK_PER_THREAD; ++w) {
+            const int tiledRow = t + row;
+            const int tiledCol = t + col;
+            ASub[col][row + w] = a[(globalRow + w) * l + tiledCol];
+            BSub[row + w][col] = b[(tiledRow + w) * m + globalCol];
+        }
+
+        barrier(CLK_LOCAL_MEM_FENCE);
+
+        for (int k = 0; k < TILE_SIZE; ++k) {
+            for (int w = 0; w < WORK_PER_THREAD; ++w) {
+                acc[w] += ASub[k][row + w] * BSub[k][col];
+            }
+        }
+
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+
+    for (int w = 0; w < WORK_PER_THREAD; ++w) {
+        c[(globalRow + w) * m + globalCol] = acc[w];
+    }
+}
