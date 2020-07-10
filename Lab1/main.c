@@ -12,6 +12,7 @@
 #ifdef __APPLE__
 #include <OpenCL/opencl.h>
 #include <time.h>
+#include <omp.h>
 #else
 #include <CL/opencl.h>
 #endif
@@ -47,15 +48,15 @@ int verify_result_with_openMP(const cl_float *first,
 	cl_float *matrix = (cl_float *)malloc(sizeof(cl_float) * n * m);
 	long long start = clock();
 #pragma omp parallel for default(none) shared(n, l, m, first, second, matrix) schedule(dynamic, 10)
-	for (i = 0; i < n; ++i) {
-		for (j = 0; j < l; ++j) {
+	for (int i = 0; i < n; ++i) {
+		for (int j = 0; j < l; ++j) {
 			for (int k = 0; k < m; ++k) {
 				matrix[i * m + k] += first[i * l + j] * second[j * m + k];
 			}
 		}
 	}
 	long long end = clock();
-	printf("openMP implementation: %lld ms\n", (end - start));
+	printf("openMP implementation: %lld.%lld(s)\n", (end - start) / 1000000, (end - start) % 1000000);
 	for (i = 0; i < n; ++i) {
 		for (j = 0; j < m; ++j) {
 			if (matrix[i * m + j] != result[i * m + j]) {
@@ -464,8 +465,11 @@ int main() {
 		printf("Something gone wring with openMP");
 	}
 
+	long long startNaive = clock();
 	printf("Verification...\n");
 	int verification = verify_result(first_matrix, second_matrix, result, n, l, m);
+	long long endNaive = clock();
+	printf("Naive implementation time: %lld.%lld(s)\n", (endNaive - startNaive) / 1000000, (endNaive - startNaive % 1000000));
 
 	if (verification) {
 		printf("Result: SUCCESS\n");
