@@ -9,10 +9,14 @@
 #define WPT 16
 
 #include <stdio.h>
+#ifdef __APPLE__
+#include <OpenCL/opencl.h>
+#include <time.h>
+#else
 #include <CL/opencl.h>
+#endif
 #include <stdlib.h>
 #include <time.h>
-#include <cuda_runtime.h>
 
 int i, j;
 
@@ -32,6 +36,34 @@ char *read_program(size_t *lSize) {
 	fclose(fp);
 	printf("Successfully read the program\n");
 	return buffer;
+}
+
+int verify_result_with_openMP(const cl_float *first,
+                              const cl_float *second,
+                              const cl_float *result,
+                              cl_uint n,
+                              cl_uint l,
+                              cl_uint m) {
+	cl_float *matrix = (cl_float *)malloc(sizeof(cl_float) * n * m);
+	long long start = clock();
+#pragma omp parallel for default(none) shared(n, l, m, first, second, matrix) schedule(dynamic, 10)
+	for (i = 0; i < n; ++i) {
+		for (j = 0; j < l; ++j) {
+			for (int k = 0; k < m; ++k) {
+				matrix[i * m + k] += first[i * l + j] * second[j * m + k];
+			}
+		}
+	}
+	long long end = clock();
+	printf("openMP implementation: %lld ms\n", (end - start));
+	for (i = 0; i < n; ++i) {
+		for (j = 0; j < m; ++j) {
+			if (matrix[i * m + j] != result[i * m + j]) {
+				return 0;
+			}
+		}
+	}
+	return 1;
 }
 
 // Naive implementation for verification
@@ -58,93 +90,8 @@ int verify_result(const cl_float *first,
 	return 1;
 }
 
-// print information about clDevices
-// return the most "powerful"
-// "powerful" means with the biggest maxComputeUnits * maxClockFrequency
-cl_device_id openClDevicesInfo() {
-	char *value;
-	size_t valueSize;
-	cl_uint platformCount;
-	cl_platform_id *platforms;
-	cl_uint deviceCount;
-	cl_device_id *devices;
-	cl_uint maxComputeUnits;
-	cl_uint maxClockFrequency;
-	int max_device_rate = 0;
-	cl_device_id result;
-
-	cl_int num_platform = clGetPlatformIDs(0, NULL, &platformCount);
-	if (num_platform != CL_SUCCESS) {
-		printf("Error: Platform num code: %d", num_platform);
-		return (cl_device_id)-1;
-	}
-
-	printf("Platforms num: %d\n", platformCount);
-
-	platforms = (cl_platform_id *)malloc(sizeof(cl_platform_id) * platformCount);
-	clGetPlatformIDs(platformCount, platforms, NULL);
-
-	for (i = 0; i < platformCount; i++) {
-		printf("%d. PlatformId: %d\n", i + 1, (int)platforms[i]);
-
-		cl_int num_device = clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, 0, NULL, &deviceCount);
-		if (num_device != CL_SUCCESS) {
-			printf("Error: Device num code: %d", num_device);
-			return (cl_device_id)-1;
-		}
-
-		devices = (cl_device_id *)malloc(sizeof(cl_device_id) * deviceCount);
-		clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, deviceCount, devices, NULL);
-
-		for (j = 0; j < deviceCount; j++) {
-			clGetDeviceInfo(devices[j], CL_DEVICE_NAME, 0, NULL, &valueSize);
-			value = (char *)malloc(valueSize);
-			clGetDeviceInfo(devices[j], CL_DEVICE_NAME, valueSize, value, NULL);
-			printf(" %d.%d. Device: %s\n", i + 1, j + 1, value);
-			free(value);
-
-			clGetDeviceInfo(devices[j], CL_DEVICE_VERSION, 0, NULL, &valueSize);
-			value = (char *)malloc(valueSize);
-			clGetDeviceInfo(devices[j], CL_DEVICE_VERSION, valueSize, value, NULL);
-			printf("  %d.%d.%d Hardware version: %s\n", i + 1, j + 1, 1, value);
-			free(value);
-
-			clGetDeviceInfo(devices[j], CL_DRIVER_VERSION, 0, NULL, &valueSize);
-			value = (char *)malloc(valueSize);
-			clGetDeviceInfo(devices[j], CL_DRIVER_VERSION, valueSize, value, NULL);
-			printf("  %d.%d.%d Software version: %s\n", i + 1, j + 1, 2, value);
-			free(value);
-
-			clGetDeviceInfo(devices[j], CL_DEVICE_OPENCL_C_VERSION, 0, NULL, &valueSize);
-			value = (char *)malloc(valueSize);
-			clGetDeviceInfo(devices[j], CL_DEVICE_OPENCL_C_VERSION, valueSize, value, NULL);
-			printf("  %d.%d.%d OpenCL C version: %s\n", i + 1, j + 1, 3, value);
-			free(value);
-
-			clGetDeviceInfo(devices[j], CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(maxComputeUnits), &maxComputeUnits, NULL);
-			printf("  %d.%d.%d Parallel compute units: %d\n", i + 1, j + 1, 4, maxComputeUnits);
-
-			clGetDeviceInfo(devices[j],
-			                CL_DEVICE_MAX_CLOCK_FREQUENCY,
-			                sizeof(maxClockFrequency),
-			                &maxClockFrequency,
-			                NULL);
-			printf("  %d.%d.%d Max clock frequency: %d\n", i + 1, j + 1, 5, maxClockFrequency);
-
-			if (maxComputeUnits * maxClockFrequency > max_device_rate) {
-				result = devices[j];
-			}
-		}
-		free(devices);
-	}
-	free(platforms);
-
-	return result;
-}
-
 // return kernel
-cl_kernel createKernel(cl_context *cl_context_value, cl_command_queue *queue) {
-	cl_device_id device = openClDevicesInfo();
+cl_kernel createKernel(cl_context *cl_context_value, cl_command_queue *queue, cl_device_id device) {
 	if ((int)device == -1) {
 		return (cl_kernel)-1;
 	}
@@ -286,6 +233,167 @@ int compute(cl_kernel kernel,
 	clReleaseMemObject(mem_c);
 }
 
+bool printInformation() {
+	char *value;
+	size_t valueSize;
+	cl_uint platformCount;
+	cl_platform_id *platforms;
+	cl_uint deviceCount;
+	cl_device_id *devices;
+	cl_uint maxComputeUnits;
+	cl_uint maxClockFrequency;
+
+	cl_int num_platform = clGetPlatformIDs(0, NULL, &platformCount);
+	if (num_platform != CL_SUCCESS) {
+		printf("Error: Platform num code: %d", num_platform);
+		return false;
+	}
+
+	printf("Platforms num: %d\n", platformCount);
+
+	platforms = (cl_platform_id *)malloc(sizeof(cl_platform_id) * platformCount);
+	clGetPlatformIDs(platformCount, platforms, NULL);
+
+	for (i = 0; i < platformCount; i++) {
+		printf("%d. PlatformId: %d\n", i + 1, (int)platforms[i]);
+
+		cl_int num_device = clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, 0, NULL, &deviceCount);
+		if (num_device != CL_SUCCESS) {
+			printf("Error: Device num code: %d", num_device);
+			return false;
+		}
+
+		devices = (cl_device_id *)malloc(sizeof(cl_device_id) * deviceCount);
+		clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, deviceCount, devices, NULL);
+
+		for (j = 0; j < deviceCount; j++) {
+			clGetDeviceInfo(devices[j], CL_DEVICE_NAME, 0, NULL, &valueSize);
+			value = (char *)malloc(valueSize);
+			clGetDeviceInfo(devices[j], CL_DEVICE_NAME, valueSize, value, NULL);
+			printf(" %d.%d. Device: %s\n", i + 1, j + 1, value);
+			free(value);
+
+			clGetDeviceInfo(devices[j], CL_DEVICE_VERSION, 0, NULL, &valueSize);
+			value = (char *)malloc(valueSize);
+			clGetDeviceInfo(devices[j], CL_DEVICE_VERSION, valueSize, value, NULL);
+			printf("  %d.%d.%d Hardware version: %s\n", i + 1, j + 1, 1, value);
+			free(value);
+
+			clGetDeviceInfo(devices[j], CL_DRIVER_VERSION, 0, NULL, &valueSize);
+			value = (char *)malloc(valueSize);
+			clGetDeviceInfo(devices[j], CL_DRIVER_VERSION, valueSize, value, NULL);
+			printf("  %d.%d.%d Software version: %s\n", i + 1, j + 1, 2, value);
+			free(value);
+
+			clGetDeviceInfo(devices[j], CL_DEVICE_OPENCL_C_VERSION, 0, NULL, &valueSize);
+			value = (char *)malloc(valueSize);
+			clGetDeviceInfo(devices[j], CL_DEVICE_OPENCL_C_VERSION, valueSize, value, NULL);
+			printf("  %d.%d.%d OpenCL C version: %s\n", i + 1, j + 1, 3, value);
+			free(value);
+
+			clGetDeviceInfo(devices[j], CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(maxComputeUnits), &maxComputeUnits, NULL);
+			printf("  %d.%d.%d Parallel compute units: %d\n", i + 1, j + 1, 4, maxComputeUnits);
+
+			clGetDeviceInfo(devices[j],
+			                CL_DEVICE_MAX_CLOCK_FREQUENCY,
+			                sizeof(maxClockFrequency),
+			                &maxClockFrequency,
+			                NULL);
+			printf("  %d.%d.%d Max clock frequency: %d\n", i + 1, j + 1, 5, maxClockFrequency);
+		}
+		free(devices);
+	}
+	free(platforms);
+	return true;
+}
+
+cl_device_id getSpecificDevice(cl_platform_id *platform_ids, cl_uint platform_count,
+                               cl_device_type cl_device, cl_bool discrete, cl_bool *success) {
+	cl_int result;
+	cl_device_id resultDevice;
+
+	for (i = 0; i < platform_count && !(*success); ++i) {
+		cl_platform_id current = platform_ids[i];
+
+		cl_uint device_count = 0;
+		result = clGetDeviceIDs(current, cl_device, 0, NULL, &device_count);
+		if (result != CL_SUCCESS || device_count == 0) {
+			continue;
+		}
+
+		cl_device_id *devices = (cl_device_id *)malloc(device_count * sizeof(cl_device_id));
+		result = clGetDeviceIDs(current, cl_device, device_count, devices, NULL);
+
+		if (result == CL_SUCCESS) {
+			for (j = 0; j < device_count && !(*success); ++j) {
+				cl_device_id current_device = devices[i];
+
+				if (discrete) {
+					cl_bool memoryInfo;
+					clGetDeviceInfo(current_device, CL_DEVICE_HOST_UNIFIED_MEMORY,
+					                sizeof(cl_bool), &memoryInfo, NULL);
+
+					if (memoryInfo == CL_FALSE) {
+						printf("Found suitable device\n");
+						*success = true;
+						resultDevice = current_device;
+					} else {
+						continue;
+					}
+				} else {
+					*success = true;
+					resultDevice = current_device;
+				}
+			}
+		}
+		free(devices);
+	}
+	if (*success) {
+		size_t nameLen = 0;
+		clGetDeviceInfo(resultDevice, CL_DEVICE_NAME, 0, NULL, &nameLen);
+		char *deviceName = (char *)malloc(nameLen * sizeof(char));
+		clGetDeviceInfo(resultDevice, CL_DEVICE_NAME, nameLen, deviceName, NULL);
+		printf("Found suitable device. Device name: %s\n", deviceName);
+		free(deviceName);
+	}
+	return resultDevice;
+}
+
+cl_device_id getDevice() {
+	cl_uint platforms_count = 0;
+	cl_uint result = clGetPlatformIDs(0, NULL, &platforms_count);
+	cl_device_id device_result;
+	if (result != CL_SUCCESS) {
+		printf("An error occurred while getting devices count");
+		return (cl_device_id)-1;
+	}
+
+	cl_platform_id *platforms = (cl_platform_id *)malloc(platforms_count * sizeof(cl_platform_id));
+	result = clGetPlatformIDs(platforms_count, platforms, NULL);
+	if (result != CL_SUCCESS) {
+		printf("An error occurred while getting device ids");
+		return (cl_device_id)-1;
+	}
+
+	cl_bool device_found = CL_FALSE;
+	// Try to find a discrete GPU
+	device_result = getSpecificDevice(platforms, platforms_count, CL_DEVICE_TYPE_GPU, CL_TRUE, &device_found);
+	if (!device_found) {
+		// Try to find an integrated GPU
+		device_result = getSpecificDevice(platforms, platforms_count, CL_DEVICE_TYPE_GPU, CL_FALSE, &device_found);
+	}
+	if (!device_found) {
+		// Try to find a CPU
+		device_result = getSpecificDevice(platforms, platforms_count, CL_DEVICE_TYPE_CPU, CL_FALSE, device_found);
+	}
+	if (!device_found) {
+		printf("No suitable devices found");
+		return (cl_device_id)-1;
+	}
+
+	return device_result;
+}
+
 int main() {
 	cl_uint n = N;
 	cl_uint l = L;
@@ -294,11 +402,24 @@ int main() {
 	time_t t;
 	srand((unsigned)time(&t));
 
+	// Print information about devices
+	if (!printInformation()) {
+		return -1;
+	}
+
+	printf("\n");
+
+	// Get device
+	cl_device_id device = getDevice();
+	if (device == (cl_device_id)-1) {
+		return -1;
+	}
+
 	cl_context cl_context_value;
 	cl_command_queue queue;
-	cl_kernel kernel = createKernel(&cl_context_value, &queue);
+	cl_kernel kernel = createKernel(&cl_context_value, &queue, device);
 
-	if (kernel == -1)
+	if (kernel == (cl_kernel)-1)
 		return -1;
 
 	cl_float *first_matrix = (cl_float *)malloc(n * l * sizeof(cl_float));
@@ -338,6 +459,11 @@ int main() {
 	cl_ulong operations = 2 * n * m * l;
 	cl_ulong gflops = operations / time;
 	printf("\nGFlops: %llu\n", gflops);
+
+	if (!verify_result_with_openMP(first_matrix, second_matrix, result, n, l, m)) {
+		printf("Something gone wring with openMP");
+	}
+
 	printf("Verification...\n");
 	int verification = verify_result(first_matrix, second_matrix, result, n, l, m);
 
