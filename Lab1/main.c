@@ -9,6 +9,7 @@
 #define WPT 16
 
 #include <stdio.h>
+#include <stdbool.h>
 #ifdef __APPLE__
 #include <OpenCL/opencl.h>
 #include <time.h>
@@ -48,10 +49,10 @@ int verify_result_with_openMP(const cl_float *first,
 	cl_float *matrix = (cl_float *)malloc(sizeof(cl_float) * n * m);
 	long long start = clock();
 #pragma omp parallel for default(none) shared(n, l, m, first, second, matrix) schedule(dynamic, 10)
-	for (int i = 0; i < n; ++i) {
-		for (int j = 0; j < l; ++j) {
+	for (int kI = 0; kI < n; ++kI) {
+		for (int kJ = 0; kJ < l; ++kJ) {
 			for (int k = 0; k < m; ++k) {
-				matrix[i * m + k] += first[i * l + j] * second[j * m + k];
+				matrix[kI * m + k] += first[kI * l + kJ] * second[kJ * m + k];
 			}
 		}
 	}
@@ -469,7 +470,9 @@ int main() {
 	printf("Verification...\n");
 	int verification = verify_result(first_matrix, second_matrix, result, n, l, m);
 	long long endNaive = clock();
-	printf("Naive implementation time: %lld.%lld(s)\n", (endNaive - startNaive) / 1000000, (endNaive - startNaive % 1000000));
+	printf("Naive implementation time: %lld.%lld(s)\n",
+	       (endNaive - startNaive) / 1000000,
+	       (endNaive - startNaive % 1000000));
 
 	if (verification) {
 		printf("Result: SUCCESS\n");
