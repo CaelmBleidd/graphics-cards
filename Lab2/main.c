@@ -1,7 +1,7 @@
 // It depends on your openCL device. More -- better
 // But if you use integrated, choose 256 or less, but power of two
 // If you use discrete, choose 512 or 1024
-#define PART_SIZE 256
+#define PART_SIZE 1024
 #define N 1024*1024
 #define FILE_NAME "prefixSum.cl"
 #define FUNCTION_NAME "prefixSum"
@@ -319,7 +319,9 @@ int compute(cl_kernel kernel,
 
 	cl_int range_error = clEnqueueNDRangeKernel(queue, kernel, 1, 0, global, local, 0, NULL, &event);
 	if (range_error != CL_SUCCESS) {
-		printf("Error: can't enqueue range: %d", range_error);
+		printf("Error: can't enqueue range: %d\n", range_error);
+		printf("Perhaps the error occurred because of PART_SIZE. Try to choose less, but power of two. Actual: %d",
+		       PART_SIZE);
 		return -1;
 	}
 
