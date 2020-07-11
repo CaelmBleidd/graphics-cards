@@ -1,9 +1,14 @@
-#define PART_SIZE 1024 // It depends on your openCL device. More -- better
+// It depends on your openCL device. More -- better
+// But if you use integrated, choose 256 or less, but power of two
+// If you use discrete, choose 512 or 1024
+#define PART_SIZE 256
 #define N 1024*1024
 #define FILE_NAME "prefixSum.cl"
 #define FUNCTION_NAME "prefixSum"
 
 #include <stdio.h>
+#include <stdbool.h>
+#include <time.h>
 #ifdef __APPLE__
 #include <OpenCL/opencl.h>
 #include <time.h>
@@ -307,7 +312,7 @@ int compute(cl_kernel kernel,
 
 	size_t *global = (size_t *)malloc(1 * sizeof(size_t));
 	size_t *local = (size_t *)malloc(1 * sizeof(size_t));
-	global[0] = n;
+	global[0] = PART_SIZE;
 	local[0] = PART_SIZE;
 
 	cl_event event;
