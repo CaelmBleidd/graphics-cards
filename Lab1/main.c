@@ -386,7 +386,7 @@ cl_device_id getDevice() {
 	}
 	if (!device_found) {
 		// Try to find a CPU
-		device_result = getSpecificDevice(platforms, platforms_count, CL_DEVICE_TYPE_CPU, CL_FALSE, device_found);
+		device_result = getSpecificDevice(platforms, platforms_count, CL_DEVICE_TYPE_CPU, CL_FALSE, &device_found);
 	}
 	if (!device_found) {
 		printf("No suitable devices found");
